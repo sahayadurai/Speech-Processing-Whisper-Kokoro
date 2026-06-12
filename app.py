@@ -151,20 +151,30 @@ async def chat(
         tmp_path = tmp.name
 
     # ── Language params ──────────────────────────────────
+    print(f"\n[DEBUG] === NEW REQUEST ===")
+    print(f"[DEBUG] Raw form data received: user_lang={repr(user_lang)}, bot_lang={repr(bot_lang)}")
+    
     if user_lang not in _WHISPER_LANGS:
+        print(f"[DEBUG] user_lang '{user_lang}' not in {_WHISPER_LANGS}, defaulting to 'en'")
         user_lang = "en"
     if bot_lang not in _KOKORO_LANG_MAP:
+        print(f"[DEBUG] bot_lang '{bot_lang}' not in {list(_KOKORO_LANG_MAP.keys())}, defaulting to 'en'")
         bot_lang = "en"
 
     kokoro_lang, kokoro_voice = _KOKORO_LANG_MAP[bot_lang]
 
     bot_lang_names = {"en": "English", "it": "Italian", "fr": "French"}
     bot_lang_name  = bot_lang_names.get(bot_lang, "English")
+    
+    print(f"[DEBUG] After validation: user_lang={user_lang}, bot_lang={bot_lang}")
+    print(f"[DEBUG] Kokoro settings: kokoro_lang={kokoro_lang}, kokoro_voice={kokoro_voice}")
+    print(f"[DEBUG] LLM will reply in: {bot_lang_name}")
 
     try:
         # ── Transcribe ───────────────────────────────────────
         model = get_whisper_model()
-        segments, _ = model.transcribe(
+        print(f"[DEBUG] Calling Whisper with language={user_lang}")
+        segments, info = model.transcribe(
             tmp_path,
             language=user_lang,
             beam_size=1,          # greedy – 2-3× faster than default beam_size=5
@@ -172,6 +182,7 @@ async def chat(
             vad_parameters={"min_silence_duration_ms": 300},
         )
         user_text = " ".join(s.text.strip() for s in segments).strip()
+        print(f"[DEBUG] Whisper detected language: {info.language}, Transcription: {user_text[:50]}...")
 
         if not user_text:
             raise HTTPException(
@@ -180,6 +191,7 @@ async def chat(
             )
 
         # ── LLM reply ────────────────────────────────────────
+        print(f"[DEBUG] Sending LLM request in {bot_lang_name}")
         llm_resp = requests.post(
             f"{OLLAMA_BASE_URL}/api/chat",
             json={
@@ -205,11 +217,13 @@ async def chat(
         )
         llm_resp.raise_for_status()
         bot_text = (llm_resp.json().get("message", {}).get("content", "") or "").strip()
+        print(f"[DEBUG] LLM replied: {bot_text[:50]}...")
 
         if not bot_text:
             raise HTTPException(status_code=500, detail="LLM returned an empty response.")
 
         # ── TTS ──────────────────────────────────────────────
+        print(f"[DEBUG] Synthesizing with Kokoro: lang={kokoro_lang}, voice={kokoro_voice}")
         ts = time.strftime("%Y%m%d_%H%M%S")
         audio_filename = f"response_{ts}_{uuid.uuid4().hex[:6]}.wav"
         audio_path = os.path.join(OUTPUT_FOLDER, audio_filename)
@@ -217,6 +231,7 @@ async def chat(
         kokoro = get_kokoro_model()
         samples, sample_rate = kokoro.create(bot_text, voice=kokoro_voice, speed=1.0, lang=kokoro_lang)
         sf.write(audio_path, samples, sample_rate)
+        print(f"[DEBUG] TTS complete, saved to: {audio_filename}")
 
         # ── Store & return ───────────────────────────────────
         entry = {
