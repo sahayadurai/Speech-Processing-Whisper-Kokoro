@@ -1,0 +1,23 @@
+# Speech Processing A2 — Voice Chatbot Web App
+# Tested on macOS (Apple Silicon & Intel)
+
+# Web framework
+flask>=3.0.0
+
+# Environment variables
+python-dotenv>=1.0.0
+
+# Numeric
+numpy>=1.24.0
+
+# Audio file I/O (write Kokoro WAV output)
+soundfile>=0.12.1
+
+# HTTP (Ollama API)
+requests>=2.31.0
+
+# Speech-to-text (faster-whisper — pre-built wheels, no cmake/LLVM required)
+faster-whisper>=1.0.0
+
+# Text-to-speech (Kokoro ONNX, runs fully locally — no Docker)
+kokoro-onnx>=0.3.1
