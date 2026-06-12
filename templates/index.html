@@ -470,6 +470,11 @@
                 formData.append('audio', audioBlob, 'audio.webm');
                 formData.append('user_lang', userLangSelect.value);
                 formData.append('bot_lang', botLangSelect.value);
+                
+                console.log(`[CLIENT] Sending request:`, {
+                    user_lang: userLangSelect.value,
+                    bot_lang: botLangSelect.value
+                });
 
                 status.textContent = '🔄 Processing...';
                 status.className = 'status processing';

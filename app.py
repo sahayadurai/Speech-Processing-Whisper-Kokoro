@@ -68,9 +68,9 @@ _chat_history: dict[str, list] = {}
 
 # Kokoro language/voice table (only languages kokoro-onnx v1.0 ships voices for)
 _KOKORO_LANG_MAP: dict[str, tuple[str, str]] = {
-    "en": ("en-us", KOKORO_VOICE),   # default voice from .env
-    "it": ("it",    "if_sara"),
-    "fr": ("fr-fr", "ff_siwis"),
+    "en": ("en-us", "af_sarah"),    # English - female voice
+    "it": ("it",    "if_sara"),     # Italian - female voice
+    "fr": ("fr-fr", "ff_siwis"),    # French - female voice
 }
 # Whisper accepts ISO-639-1 codes directly
 _WHISPER_LANGS = {"en", "it", "fr", "de"}
@@ -133,6 +133,17 @@ async def index(request: Request):
     return FileResponse(os.path.join(TEMPLATES_FOLDER, "index.html"), media_type="text/html")
 
 
+@app.get("/test-lang")
+async def test_lang(user_lang: str = "en", bot_lang: str = "en"):
+    """Test endpoint to verify language parameters"""
+    return {
+        "received_user_lang": user_lang,
+        "received_bot_lang": bot_lang,
+        "whisper_langs": list(_WHISPER_LANGS),
+        "kokoro_langs": list(_KOKORO_LANG_MAP.keys())
+    }
+
+
 @app.post("/chat")
 async def chat(
     request: Request,
@@ -154,6 +165,10 @@ async def chat(
     print(f"\n[DEBUG] === NEW REQUEST ===")
     print(f"[DEBUG] Raw form data received: user_lang={repr(user_lang)}, bot_lang={repr(bot_lang)}")
     
+    # Validation with detailed logging
+    original_user_lang = user_lang
+    original_bot_lang = bot_lang
+    
     if user_lang not in _WHISPER_LANGS:
         print(f"[DEBUG] user_lang '{user_lang}' not in {_WHISPER_LANGS}, defaulting to 'en'")
         user_lang = "en"
@@ -161,14 +176,16 @@ async def chat(
         print(f"[DEBUG] bot_lang '{bot_lang}' not in {list(_KOKORO_LANG_MAP.keys())}, defaulting to 'en'")
         bot_lang = "en"
 
+    # Get Kokoro configuration
     kokoro_lang, kokoro_voice = _KOKORO_LANG_MAP[bot_lang]
 
     bot_lang_names = {"en": "English", "it": "Italian", "fr": "French"}
     bot_lang_name  = bot_lang_names.get(bot_lang, "English")
     
-    print(f"[DEBUG] After validation: user_lang={user_lang}, bot_lang={bot_lang}")
-    print(f"[DEBUG] Kokoro settings: kokoro_lang={kokoro_lang}, kokoro_voice={kokoro_voice}")
-    print(f"[DEBUG] LLM will reply in: {bot_lang_name}")
+    print(f"[DEBUG] Validation complete:")
+    print(f"[DEBUG]   user_lang: {original_user_lang} → {user_lang}")
+    print(f"[DEBUG]   bot_lang: {original_bot_lang} → {bot_lang}")
+    print(f"[DEBUG]   Kokoro config: lang={kokoro_lang}, voice={kokoro_voice}, bot_lang_name={bot_lang_name}")
 
     try:
         # ── Transcribe ───────────────────────────────────────
