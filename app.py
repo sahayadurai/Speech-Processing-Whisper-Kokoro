@@ -5,7 +5,11 @@ import tempfile
 import threading
 import requests
 import soundfile as sf
-from flask import Flask, request, jsonify, render_template, send_file, session
+from fastapi import FastAPI, UploadFile, File, Form, HTTPException, Request
+from fastapi.responses import FileResponse, JSONResponse
+from fastapi.staticfiles import StaticFiles
+from fastapi.middleware.cors import CORSMiddleware
+from starlette.middleware.sessions import SessionMiddleware
 from faster_whisper import WhisperModel
 from kokoro_onnx import Kokoro
 from dotenv import load_dotenv
@@ -15,13 +19,24 @@ load_dotenv()
 # -----------------------------
 # CONFIG
 # -----------------------------
-app = Flask(__name__)
-app.secret_key = os.environ.get("SECRET_KEY", "sp-a2-chatbot-local-2026")
+app = FastAPI(title="Voice Chatbot")
+SECRET_KEY = os.environ.get("SECRET_KEY", "sp-a2-chatbot-local-2026")
+
+# Middleware
+app.add_middleware(SessionMiddleware, secret_key=SECRET_KEY)
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 MODELS_FOLDER = os.path.join(BASE_DIR, "models")
 OUTPUT_FOLDER = os.path.join(BASE_DIR, "outputs")
 INPUT_AUDIO_FOLDER = os.path.join(BASE_DIR, "input_audio")
+TEMPLATES_FOLDER = os.path.join(BASE_DIR, "templates")
 KOKORO_ONNX = os.path.join(MODELS_FOLDER, "kokoro", "kokoro-v1.0.onnx")
 KOKORO_VOICES = os.path.join(MODELS_FOLDER, "kokoro", "voices-v1.0.bin")
 KOKORO_ONNX_MIN_SIZE = 50 * 1024 * 1024  # 50 MB
@@ -30,11 +45,18 @@ OLLAMA_BASE_URL = os.environ.get("OLLAMA_BASE_URL", "http://localhost:11434")
 OLLAMA_MODEL   = os.environ.get("OLLAMA_MODEL",    "qwen3:1.7b")
 WHISPER_MODEL  = os.environ.get("WHISPER_MODEL",   "turbo")
 KOKORO_VOICE   = os.environ.get("KOKORO_VOICE",    "af_sarah")
-FLASK_PORT     = int(os.environ.get("PORT",        8080))
+FASTAPI_PORT   = int(os.environ.get("PORT",        8080))
 
 os.makedirs(OUTPUT_FOLDER, exist_ok=True)
 os.makedirs(INPUT_AUDIO_FOLDER, exist_ok=True)
 os.makedirs(os.path.join(MODELS_FOLDER, "kokoro"), exist_ok=True)
+os.makedirs(TEMPLATES_FOLDER, exist_ok=True)
+
+# Mount static files for templates
+try:
+    app.mount("/static", StaticFiles(directory=TEMPLATES_FOLDER), name="static")
+except Exception:
+    pass
 
 # Models loaded once, protected by a lock during initialisation
 _whisper_model: WhisperModel | None = None
@@ -89,47 +111,46 @@ def get_kokoro_model() -> Kokoro:
     return _kokoro_model
 
 
-def _ensure_session() -> str:
-    """Return (and create if needed) a persistent session ID."""
-    if "sid" not in session:
+def _get_or_create_session_id(request: Request) -> str:
+    """Get session ID from cookie or create a new one."""
+    if "sid" not in request.session:
         sid = str(uuid.uuid4())
-        session["sid"] = sid
+        request.session["sid"] = sid
         _chat_history[sid] = []
-    sid = session["sid"]
-    if sid not in _chat_history:
-        _chat_history[sid] = []
+    else:
+        sid = request.session["sid"]
+        if sid not in _chat_history:
+            _chat_history[sid] = []
     return sid
 
 
 # -----------------------------
 # ROUTES
 # -----------------------------
-@app.route("/")
-def index():
-    _ensure_session()
-    return render_template("index.html")
+@app.get("/")
+async def index(request: Request):
+    _get_or_create_session_id(request)
+    return FileResponse(os.path.join(TEMPLATES_FOLDER, "index.html"), media_type="text/html")
 
 
-@app.route("/chat", methods=["POST"])
-def chat():
-    sid = _ensure_session()
-
-    if "audio" not in request.files:
-        return jsonify({"error": "No audio file in request"}), 400
-
-    audio_file = request.files["audio"]
+@app.post("/chat")
+async def chat(
+    request: Request,
+    audio: UploadFile = File(...),
+    user_lang: str = Form("en"),
+    bot_lang: str = Form("en"),
+):
+    sid = _get_or_create_session_id(request)
 
     # Persist incoming audio to a temp file (ffmpeg-readable by faster-whisper)
     with tempfile.NamedTemporaryFile(
         suffix=".webm", delete=False, dir=INPUT_AUDIO_FOLDER
     ) as tmp:
-        audio_file.save(tmp.name)
+        content = await audio.read()
+        tmp.write(content)
         tmp_path = tmp.name
 
     # ── Language params ──────────────────────────────────
-    user_lang = request.form.get("user_lang", "en")
-    bot_lang  = request.form.get("bot_lang",  "en")
-
     if user_lang not in _WHISPER_LANGS:
         user_lang = "en"
     if bot_lang not in _KOKORO_LANG_MAP:
@@ -153,7 +174,10 @@ def chat():
         user_text = " ".join(s.text.strip() for s in segments).strip()
 
         if not user_text:
-            return jsonify({"error": "No speech detected. Please speak clearly and try again."}), 422
+            raise HTTPException(
+                status_code=422,
+                detail="No speech detected. Please speak clearly and try again."
+            )
 
         # ── LLM reply ────────────────────────────────────────
         llm_resp = requests.post(
@@ -183,7 +207,7 @@ def chat():
         bot_text = (llm_resp.json().get("message", {}).get("content", "") or "").strip()
 
         if not bot_text:
-            return jsonify({"error": "LLM returned an empty response."}), 500
+            raise HTTPException(status_code=500, detail="LLM returned an empty response.")
 
         # ── TTS ──────────────────────────────────────────────
         ts = time.strftime("%Y%m%d_%H%M%S")
@@ -203,8 +227,12 @@ def chat():
             "timestamp": time.strftime("%H:%M"),
         }
         _chat_history[sid].append(entry)
-        return jsonify(entry)
+        return JSONResponse(entry)
 
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
     finally:
         try:
             os.unlink(tmp_path)
@@ -212,34 +240,33 @@ def chat():
             pass
 
 
-@app.route("/audio/<filename>")
-def serve_audio(filename: str):
+@app.get("/audio/{filename}")
+async def serve_audio(filename: str):
     # Prevent path traversal attacks
     safe_name = os.path.basename(filename)
     path = os.path.join(OUTPUT_FOLDER, safe_name)
     if not os.path.isfile(path):
-        return "Not found", 404
-    return send_file(path, mimetype="audio/wav")
+        raise HTTPException(status_code=404, detail="Not found")
+    return FileResponse(path, media_type="audio/wav")
 
 
-@app.route("/history")
-def history():
-    sid = session.get("sid", "")
-    return jsonify(_chat_history.get(sid, []))
+@app.get("/history")
+async def history(request: Request):
+    sid = request.session.get("sid", "")
+    return JSONResponse(_chat_history.get(sid, []))
 
 
-@app.route("/new_chat", methods=["POST"])
-def new_chat():
-    sid = session.get("sid", "")
+@app.post("/new_chat")
+async def new_chat(request: Request):
+    sid = request.session.get("sid", "")
     if sid and sid in _chat_history:
         _chat_history[sid] = []
-    return jsonify({"ok": True})
+    return JSONResponse({"ok": True})
 
 
-# -----------------------------
-# STARTUP
-# -----------------------------
-if __name__ == "__main__":
+# Startup event
+@app.on_event("startup")
+async def startup_event():
     print("Warming up models (this may take a moment on first run)…")
     try:
         get_whisper_model()
@@ -247,5 +274,9 @@ if __name__ == "__main__":
     except Exception as exc:
         print(f"[WARN] Model pre-load failed: {exc}")
 
-    print(f"\nServer ready →  http://localhost:{FLASK_PORT}\n")
-    app.run(host="127.0.0.1", port=FLASK_PORT, debug=False, threaded=True)
+    print(f"\nServer ready →  http://localhost:{FASTAPI_PORT}\n")
+
+
+if __name__ == "__main__":
+    import uvicorn
+    uvicorn.run(app, host="127.0.0.1", port=FASTAPI_PORT)

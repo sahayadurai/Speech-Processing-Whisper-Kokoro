@@ -1,8 +1,13 @@
 # Speech Processing A2 — Voice Chatbot Web App
 # Tested on macOS (Apple Silicon & Intel)
 
-# Web framework
-flask>=3.0.0
+# Web framework (FastAPI)
+fastapi>=0.104.0
+uvicorn[standard]>=0.24.0
+
+# ASGI middleware for sessions
+starlette>=0.27.0
+itsdangerous>=2.0.0
 
 # Environment variables
 python-dotenv>=1.0.0

@@ -1,0 +1,9 @@
+SECRET_KEY=
+PORT=
+
+OLLAMA_BASE_URL=http://localhost:11434
+OLLAMA_MODEL=qwen3:1.7b
+
+WHISPER_MODEL=turbo
+
+KOKORO_VOICE=af_sarah
