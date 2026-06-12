@@ -259,12 +259,44 @@
             color: #dc3545;
         }
 
+        .status.playing {
+            color: #28a745;
+            font-weight: 600;
+        }
+
         /* Spacebar hint */
         .spacebar-hint {
             font-size: 11px;
             color: #adb5bd;
             text-align: center;
             margin-top: 4px;
+        }
+
+        /* Mute toggle button */
+        .mute-btn {
+            background: transparent;
+            border: 1px solid #dee2e6;
+            color: #6c757d;
+            font-size: 13px;
+            padding: 4px 10px;
+            border-radius: 20px;
+            cursor: pointer;
+            width: auto;
+            flex: 0;
+            white-space: nowrap;
+            transition: all 0.2s ease;
+        }
+
+        .mute-btn:hover {
+            background: #f8f9fa;
+            border-color: #adb5bd;
+            transform: none;
+            box-shadow: none;
+        }
+
+        .mute-btn.muted {
+            color: #dc3545;
+            border-color: #dc3545;
         }
 
         ::-webkit-scrollbar {
@@ -337,6 +369,7 @@
                     <span id="record-icon">🎤</span>
                     <span id="record-text">Record</span>
                 </button>
+                <button class="mute-btn" id="mute-btn" title="Toggle auto-play">🔊 Auto</button>
             </div>
             <div class="status" id="status"></div>
             <div class="spacebar-hint">💡 Tip: Hold SPACE or click to record</div>
@@ -353,10 +386,30 @@
         const userLangSelect = document.getElementById('user-lang');
         const botLangSelect = document.getElementById('bot-lang');
         const newChatBtn = document.getElementById('new-chat-btn');
+        const muteBtn = document.getElementById('mute-btn');
 
         let mediaRecorder;
         let audioChunks = [];
         let isRecording = false;
+        let autoPlay = true;      // auto-play TTS by default
+        let currentAudio = null;  // track currently playing audio
+
+        // Mute / unmute toggle
+        muteBtn.addEventListener('click', () => {
+            autoPlay = !autoPlay;
+            if (autoPlay) {
+                muteBtn.textContent = '🔊 Auto';
+                muteBtn.classList.remove('muted');
+            } else {
+                muteBtn.textContent = '🔇 Muted';
+                muteBtn.classList.add('muted');
+                // stop any in-progress playback
+                if (currentAudio) {
+                    currentAudio.pause();
+                    currentAudio = null;
+                }
+            }
+        });
 
         // Initialize UI
         async function init() {
@@ -492,9 +545,37 @@
                 const entry = await response.json();
                 addMessageToUI(entry);
 
-                status.textContent = '✓ Done';
-                status.className = 'status';
-                setTimeout(() => { status.textContent = ''; }, 2000);
+                // ── Auto-play TTS audio ───────────────────────────────
+                if (autoPlay && entry.audio_url) {
+                    status.textContent = '🔊 Playing response…';
+                    status.className = 'status playing';
+
+                    currentAudio = new Audio(entry.audio_url);
+                    currentAudio.onended = () => {
+                        currentAudio = null;
+                        status.textContent = '✓ Done';
+                        status.className = 'status';
+                        setTimeout(() => { status.textContent = ''; }, 1500);
+                    };
+                    currentAudio.onerror = () => {
+                        currentAudio = null;
+                        status.textContent = '✓ Done (audio error)';
+                        status.className = 'status';
+                        setTimeout(() => { status.textContent = ''; }, 2000);
+                    };
+                    currentAudio.play().catch(() => {
+                        // Browser may block autoplay without prior user gesture;
+                        // the manual audio control in the chat bubble still works.
+                        currentAudio = null;
+                        status.textContent = '✓ Done';
+                        status.className = 'status';
+                        setTimeout(() => { status.textContent = ''; }, 1500);
+                    });
+                } else {
+                    status.textContent = '✓ Done';
+                    status.className = 'status';
+                    setTimeout(() => { status.textContent = ''; }, 2000);
+                }
             } catch (error) {
                 status.textContent = '❌ ' + error.message;
                 status.className = 'status error';

@@ -9,7 +9,7 @@
 
 ## Overview
 
-A real-time, browser-based voice chatbot built with FastAPI. Users hold the spacebar (or click) in the web UI to record speech, which is streamed to a FastAPI backend, transcribed with faster-whisper, answered by an Ollama LLM, synthesised to speech with Kokoro TTS, and played back in the browser. Chat history is maintained per session. The UI is minimalist with a gradient background, responsive layout, and intuitive controls for multilingual STT and TTS (English, Italian, French; German for STT only).
+A real-time, browser-based voice chatbot built with FastAPI. Users hold the spacebar (or click) in the web UI to record speech, which is streamed to a FastAPI backend, transcribed with faster-whisper, answered by an Ollama LLM, synthesised to speech with Kokoro TTS, and **automatically played back** in the browser. Chat history is maintained per session. The UI is minimalist with a gradient background, responsive layout, and intuitive controls for multilingual STT and TTS (English, Italian, French; German for STT only).
 
 ---
 
@@ -33,15 +33,18 @@ A real-time, browser-based voice chatbot built with FastAPI. Users hold the spac
   - Default: Blue "🎤 Record"
   - Recording: Red "⏹ Recording..." with pulse animation
   - Processing: Gray "⏳ Processing..." (disabled)
+- **Auto-Play TTS**: Bot speech is automatically played back via the Web Audio API as soon as the server response arrives. The audio element in each chat bubble remains available for manual replay.
+- **🔊 Auto / 🔇 Muted Toggle**: Pill-shaped button next to Record lets the user instantly enable or disable auto-play without reloading the page. Clicking it while audio is playing also stops the current playback.
 - **Spacebar Support**: Hold spacebar to record; release to stop. Focus-aware to avoid accidental activation in inputs
 - **New Chat Button**: Green button to clear history and start fresh
-- **Status Display**: Real-time feedback (Processing, Done, Errors)
+- **Status Display**: Real-time feedback (Processing, **🔊 Playing response…**, Done, Errors)
 - **Responsive Design**: Adapts to mobile devices with touch support
 
 ### Interaction Modes
 1. **Mouse/Trackpad**: `pointerdown` → record, `pointerup` → stop
 2. **Touch**: `touchstart` → record, `touchend` → stop
 3. **Keyboard**: `spacebar down` → record, `spacebar up` → stop (disabled during active element focus)
+4. **Auto-Play**: `Audio.play()` triggered immediately on server response; gracefully falls back if the browser blocks autoplay
 
 ---
 
@@ -164,5 +167,11 @@ The `run.sh` script automates all steps in a single click:
    - Clear dependency tables
    - Step-by-step setup explanation
    - Environment variable reference
+
+5. **Auto-Play TTS Speech**
+   - Bot audio is automatically played back via the Web Audio API (`new Audio(url).play()`) the moment the server response arrives
+   - A `🔊 Auto / 🔇 Muted` toggle button next to the Record button lets the user silence auto-play at any time
+   - If the browser blocks autoplay (e.g. no prior user gesture), the manual audio player in the chat bubble is still available
+   - Status bar shows `🔊 Playing response…` in green while audio is active, then transitions to `✓ Done`
 
 ---
